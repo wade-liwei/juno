@@ -40,6 +40,9 @@ rpc_node = "<rpc-ip/host>:<rpc-port>"
 client_node = "<client-ip/host>:<client-port>"
 
 [database]
+type = "mongodb"
+
+[database.config]
 host = "<db-host>"
 port = <db-port>
 name = "<db-name>"
@@ -55,6 +58,9 @@ rpc_node = "<rpc-ip/host>:<rpc-port>"
 client_node = "<client-ip/host>:<client-port>"
 
 [database]
+type = "postgresql"
+
+[database.config]
 name = "<db-name>"
 uri = "<mongodb-uri>"
 ```
