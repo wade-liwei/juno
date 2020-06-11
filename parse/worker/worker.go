@@ -106,8 +106,8 @@ func (w Worker) Start() {
 		}
 	}
 
-	for event := range w.eventsQueue {
-		log.Debug().Str("query", event.Query).Msg("new event")
+	for range w.eventsQueue {
+		log.Debug().Msg("HEY")
 	}
 }
 
