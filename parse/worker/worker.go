@@ -72,31 +72,42 @@ func RegisterMsgHandler(handler MsgHandler) {
 // Worker defines a job consumer that is responsible for getting and
 // aggregating block and associated data and exporting it to a database.
 type Worker struct {
-	Cdc         *codec.Codec
-	ClientProxy client.ClientProxy
-	queue       types.Queue
-	Db          db.Database
+	Cdc          *codec.Codec
+	ClientProxy  client.ClientProxy
+	heightsQueue types.HeightsQueue
+	eventsQueue  types.EventsQueue
+	Db           db.Database
 }
 
 // NewWorker allows to create a new Worker implementation.
-func NewWorker(cdc *codec.Codec, cp client.ClientProxy, q types.Queue, db db.Database) Worker {
-	return Worker{cdc, cp, q, db}
+func NewWorker(cdc *codec.Codec, cp client.ClientProxy, hq types.HeightsQueue, eq types.EventsQueue, db db.Database) Worker {
+	return Worker{
+		Cdc:          cdc,
+		ClientProxy:  cp,
+		heightsQueue: hq,
+		eventsQueue:  eq,
+		Db:           db,
+	}
 }
 
 // Start starts a worker by listening for new jobs (block heights) from the
-// given worker queue. Any failed job is logged and re-enqueued.
+// given worker heightsQueue. Any failed job is logged and re-enqueued.
 func (w Worker) Start() {
-	for i := range w.queue {
-		log.Debug().Int64("height", i).Msg("processing block")
+	for height := range w.heightsQueue {
+		log.Debug().Int64("height", height).Msg("processing block")
 
-		if err := w.process(i); err != nil {
+		if err := w.process(height); err != nil {
 			// re-enqueue any failed job
 			// TODO: Implement exponential backoff or max retries for a block height.
 			go func() {
-				log.Error().Err(err).Int64("height", i).Msg("re-enqueueing failed block")
-				w.queue <- i
+				log.Error().Err(err).Int64("height", height).Msg("re-enqueueing failed block")
+				w.heightsQueue <- height
 			}()
 		}
+	}
+
+	for event := range w.eventsQueue {
+		log.Debug().Str("query", event.Query).Msg("new event")
 	}
 }
 

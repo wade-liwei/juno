@@ -11,7 +11,9 @@ import (
 const (
 	FlagStartHeight     = "start-height"
 	FlagWorkerCount     = "workers"
+	FlagParseOldBlocks  = "parse-old-blocks"
 	FlagListenNewBlocks = "listen-new-blocks"
+	FlagListenEvents    = "listen-events"
 	FlagLogLevel        = "log-level"
 	FlagLogFormat       = "log-format"
 	FlagFormat          = "format"

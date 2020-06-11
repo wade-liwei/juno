@@ -51,7 +51,9 @@ func GetParseCmd(cdc *codec.Codec, builder db.Builder) *cobra.Command {
 func SetupFlags(cmd *cobra.Command) *cobra.Command {
 	cmd.Flags().Int64(config.FlagStartHeight, 1, "sync missing or failed blocks starting from a given height")
 	cmd.Flags().Int64(config.FlagWorkerCount, 1, "number of workers to run concurrently")
+	cmd.Flags().Bool(config.FlagParseOldBlocks, true, "parse old and missing blocks")
 	cmd.Flags().Bool(config.FlagListenNewBlocks, true, "listen to new blocks")
+	cmd.Flags().Bool(config.FlagListenEvents, true, "listen to new events")
 	cmd.Flags().String(config.FlagLogLevel, zerolog.InfoLevel.String(), "logging level")
 	cmd.Flags().String(config.FlagLogFormat, logLevelJSON, "logging format; must be either json or text")
 	return cmd
@@ -94,10 +96,13 @@ func ParseCmdHandler(codec *codec.Codec, dbBuilder db.Builder, configPath string
 	if err != nil {
 		return errors.Wrap(err, "failed to start RPC client")
 	}
-	defer cp.Stop() // nolint: errcheck
+	defer cp.Stop()
 
 	// Create a queue that will collect, aggregate, and export blocks and metadata
-	exportQueue := types.NewQueue(25)
+	heightsQueue := types.NewHeightsQueue(25)
+
+	// Create a queue that will collect, aggregate and export events
+	eventsQueue := types.NewEventsQueue(25)
 
 	database, err := dbBuilder(*cfg, codec)
 	if err != nil {
@@ -108,7 +113,7 @@ func ParseCmdHandler(codec *codec.Codec, dbBuilder db.Builder, configPath string
 	workerCount := viper.GetInt64(config.FlagWorkerCount)
 	workers := make([]worker.Worker, workerCount, workerCount)
 	for i := range workers {
-		workers[i] = worker.NewWorker(codec, cp, exportQueue, *database)
+		workers[i] = worker.NewWorker(codec, cp, heightsQueue, eventsQueue, *database)
 	}
 
 	wg.Add(1)
@@ -124,10 +129,16 @@ func ParseCmdHandler(codec *codec.Codec, dbBuilder db.Builder, configPath string
 	// Listen for and trap any OS signal to gracefully shutdown and exit
 	trapSignal()
 
-	go enqueueMissingBlocks(exportQueue, cp)
+	if viper.GetBool(config.FlagParseOldBlocks) {
+		go enqueueMissingBlocks(heightsQueue, cp)
+	}
 
 	if viper.GetBool(config.FlagListenNewBlocks) {
-		go startNewBlockListener(exportQueue, cp)
+		go startNewBlockListener(heightsQueue, cp)
+	}
+
+	if viper.GetBool(config.FlagListenEvents) {
+		go startNewEventsListener("tm.event = 'NewBlock'", eventsQueue, cp)
 	}
 
 	// Block main process (signal capture will call WaitGroup's Done)
@@ -137,7 +148,7 @@ func ParseCmdHandler(codec *codec.Codec, dbBuilder db.Builder, configPath string
 
 // enqueueMissingBlocks enqueues jobs (block heights) for missed blocks starting
 // at the startHeight up until the latest known height.
-func enqueueMissingBlocks(exportQueue types.Queue, cp client.ClientProxy) {
+func enqueueMissingBlocks(exportQueue types.HeightsQueue, cp client.ClientProxy) {
 	latestBlockHeight, err := cp.LatestHeight()
 	if err != nil {
 		log.Fatal().Err(errors.Wrap(err, "failed to get lastest block from RPC client"))
@@ -155,7 +166,7 @@ func enqueueMissingBlocks(exportQueue types.Queue, cp client.ClientProxy) {
 // startNewBlockListener subscribes to new block events via the Tendermint RPC
 // and enqueues each new block height onto the provided queue. It blocks as new
 // blocks are incoming.
-func startNewBlockListener(exportQueue types.Queue, cp client.ClientProxy) {
+func startNewBlockListener(exportQueue types.HeightsQueue, cp client.ClientProxy) {
 	eventCh, cancel, err := cp.SubscribeNewBlocks("juno-client")
 	defer cancel()
 
@@ -171,6 +182,25 @@ func startNewBlockListener(exportQueue types.Queue, cp client.ClientProxy) {
 
 		log.Debug().Int64("height", height).Msg("enqueueing new block")
 		exportQueue <- height
+	}
+}
+
+// startNewEventsListener subscribes to new events with the given query via the
+// Tendermint RPC and enqueues each event onto the provided queue. It blocks as new
+// events are incoming.
+func startNewEventsListener(query string, eventsQueue types.EventsQueue, cp client.ClientProxy) {
+	eventCh, cancel, err := cp.SubscribeEvents("juno-client", query)
+	defer cancel()
+
+	if err != nil {
+		log.Fatal().Err(errors.Wrap(err, fmt.Sprintf("failed to subscribe to query %s", query)))
+	}
+
+	log.Info().Msg(fmt.Sprintf("listening for new events with query %s...", query))
+
+	for e := range eventCh {
+		log.Debug().Str("event_query", e.Query).Msg("enqueueing new event")
+		eventsQueue <- e
 	}
 }
 
