@@ -72,43 +72,49 @@ func RegisterMsgHandler(handler MsgHandler) {
 // Worker defines a job consumer that is responsible for getting and
 // aggregating block and associated data and exporting it to a database.
 type Worker struct {
-	Cdc          *codec.Codec
-	ClientProxy  client.ClientProxy
-	heightsQueue types.HeightsQueue
-	eventsQueue  types.EventsQueue
-	Db           db.Database
+	Cdc         *codec.Codec
+	ClientProxy client.ClientProxy
+	eventsQueue types.EventsQueue
+	Db          db.Database
 }
 
 // NewWorker allows to create a new Worker implementation.
-func NewWorker(cdc *codec.Codec, cp client.ClientProxy, hq types.HeightsQueue, eq types.EventsQueue, db db.Database) Worker {
+func NewWorker(cdc *codec.Codec, cp client.ClientProxy, eq types.EventsQueue, db db.Database) Worker {
 	return Worker{
-		Cdc:          cdc,
-		ClientProxy:  cp,
-		heightsQueue: hq,
-		eventsQueue:  eq,
-		Db:           db,
+		Cdc:         cdc,
+		ClientProxy: cp,
+		eventsQueue: eq,
+		Db:          db,
 	}
 }
 
 // Start starts a worker by listening for new jobs (block heights) from the
 // given worker heightsQueue. Any failed job is logged and re-enqueued.
 func (w Worker) Start() {
-	for height := range w.heightsQueue {
-		log.Debug().Int64("height", height).Msg("processing block")
-
-		if err := w.process(height); err != nil {
-			// re-enqueue any failed job
-			// TODO: Implement exponential backoff or max retries for a block height.
-			go func() {
-				log.Error().Err(err).Int64("height", height).Msg("re-enqueueing failed block")
-				w.heightsQueue <- height
-			}()
+	for event := range w.eventsQueue {
+		if height, isHeight := event.(int64); isHeight {
+			w.processBlockHeight(height)
+		} else {
+			w.processOtherEvent(event)
 		}
 	}
+}
 
-	for range w.eventsQueue {
-		log.Debug().Msg("HEY")
+func (w Worker) processBlockHeight(height int64) {
+	log.Debug().Int64("height", height).Msg("processing block")
+
+	if err := w.process(height); err != nil {
+		// re-enqueue any failed job
+		// TODO: Implement exponential backoff or max retries for a block height.
+		go func() {
+			log.Error().Err(err).Int64("height", height).Msg("re-enqueueing failed block")
+			w.eventsQueue <- height
+		}()
 	}
+}
+
+func (w Worker) processOtherEvent(event interface{}) {
+	log.Debug().Msg("processing other event")
 }
 
 // process defines the job consumer workflow. It will fetch a block for a given

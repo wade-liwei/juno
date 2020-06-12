@@ -98,9 +98,6 @@ func ParseCmdHandler(codec *codec.Codec, dbBuilder db.Builder, configPath string
 	}
 	defer cp.Stop()
 
-	// Create a queue that will collect, aggregate, and export blocks and metadata
-	heightsQueue := types.NewHeightsQueue(25)
-
 	// Create a queue that will collect, aggregate and export events
 	eventsQueue := types.NewEventsQueue(25)
 
@@ -113,7 +110,7 @@ func ParseCmdHandler(codec *codec.Codec, dbBuilder db.Builder, configPath string
 	workerCount := viper.GetInt64(config.FlagWorkerCount)
 	workers := make([]worker.Worker, workerCount, workerCount)
 	for i := range workers {
-		workers[i] = worker.NewWorker(codec, cp, heightsQueue, eventsQueue, *database)
+		workers[i] = worker.NewWorker(codec, cp, eventsQueue, *database)
 	}
 
 	wg.Add(1)
@@ -130,15 +127,15 @@ func ParseCmdHandler(codec *codec.Codec, dbBuilder db.Builder, configPath string
 	trapSignal()
 
 	if viper.GetBool(config.FlagParseOldBlocks) {
-		go enqueueMissingBlocks(heightsQueue, cp)
+		go enqueueMissingBlocks(eventsQueue, cp)
 	}
 
 	if viper.GetBool(config.FlagListenNewBlocks) {
-		go startNewBlockListener(heightsQueue, cp)
+		go startNewBlockListener(eventsQueue, cp)
 	}
 
 	if viper.GetBool(config.FlagListenEvents) {
-		go startNewEventsListener("tm.event = 'NewBlock'", eventsQueue, cp)
+		go startNewEventsListener("tm.event = 'proposer_reward'", eventsQueue, cp)
 	}
 
 	// Block main process (signal capture will call WaitGroup's Done)
@@ -148,7 +145,7 @@ func ParseCmdHandler(codec *codec.Codec, dbBuilder db.Builder, configPath string
 
 // enqueueMissingBlocks enqueues jobs (block heights) for missed blocks starting
 // at the startHeight up until the latest known height.
-func enqueueMissingBlocks(exportQueue types.HeightsQueue, cp client.ClientProxy) {
+func enqueueMissingBlocks(exportQueue types.EventsQueue, cp client.ClientProxy) {
 	latestBlockHeight, err := cp.LatestHeight()
 	if err != nil {
 		log.Fatal().Err(errors.Wrap(err, "failed to get lastest block from RPC client"))
@@ -166,8 +163,8 @@ func enqueueMissingBlocks(exportQueue types.HeightsQueue, cp client.ClientProxy)
 // startNewBlockListener subscribes to new block events via the Tendermint RPC
 // and enqueues each new block height onto the provided queue. It blocks as new
 // blocks are incoming.
-func startNewBlockListener(exportQueue types.HeightsQueue, cp client.ClientProxy) {
-	eventCh, cancel, err := cp.SubscribeNewBlocks("juno-client")
+func startNewBlockListener(exportQueue types.EventsQueue, cp client.ClientProxy) {
+	eventCh, cancel, err := cp.SubscribeNewBlocks("juno-client-blocks")
 	defer cancel()
 
 	if err != nil {
@@ -189,7 +186,7 @@ func startNewBlockListener(exportQueue types.HeightsQueue, cp client.ClientProxy
 // Tendermint RPC and enqueues each event onto the provided queue. It blocks as new
 // events are incoming.
 func startNewEventsListener(query string, eventsQueue types.EventsQueue, cp client.ClientProxy) {
-	eventCh, cancel, err := cp.SubscribeEvents("juno-client", query)
+	eventCh, cancel, err := cp.SubscribeEvents("juno-client-events", query)
 	defer cancel()
 
 	if err != nil {

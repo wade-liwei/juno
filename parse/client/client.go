@@ -89,9 +89,7 @@ func (cp ClientProxy) Stop() error {
 // cancel function and an error is returned. It is up to the caller to cancel
 // the context and handle any errors appropriately.
 func (cp ClientProxy) SubscribeNewBlocks(subscriber string) (<-chan tmctypes.ResultEvent, context.CancelFunc, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	eventCh, err := cp.rpcClient.Subscribe(ctx, subscriber, "tm.event = 'NewBlock'")
-	return eventCh, cancel, err
+	return cp.SubscribeEvents(subscriber, "tm.event = 'NewBlock'")
 }
 
 // SubscribeEvents subscribes to the new event handler based on the given query
