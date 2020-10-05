@@ -309,6 +309,8 @@ func (w Worker) ExportBlock(b *tmctypes.ResultBlock, txs []types.Tx, vals *tmcty
 // ExportTxs accepts a slice of transactions and persists then inside the database.
 // An error is returned if the write fails.
 func (w Worker) ExportTxs(txs []types.Tx) error {
+
+	fmt.Println("export txs")
 	// Handle all the transactions inside the block
 	for _, tx := range txs {
 		// Save the transaction itself
@@ -325,7 +327,9 @@ func (w Worker) ExportTxs(txs []types.Tx) error {
 		}
 
 		// Handle all the messages contained inside the transaction
+		fmt.Printf("tx msg len: %v\n", len(tx.Messages))
 		for i, msg := range tx.Messages {
+			fmt.Printf("msg idx: %v content: %v \n", i, msg)
 			// Call the handlers
 			for _, handler := range msgHandlers {
 				if err := handler(tx, i, msg, w); err != nil {
